@@ -9,7 +9,7 @@
 ## Core tables
 | Table | Meaning | Key | Notes |
 |---|---|---|---|
-| `pat` | patients | `pid` int (not identity) | ids dense 1..N → app likely uses MAX+1 (unproven). Names upper-case. |
+| `pat` | patients | `pid` int (not identity) | Deleted patients leave child rows (apt, apn, aptdel, AppointmentLog, cnt, rcl), so next pid = 1 + max over all of them (see `scripts/sql/create_test_patient.sql`). Names upper-case. |
 | `inf` | patient contact prefs | `infpid` = `pat.pid` | always 1:1 with `pat`; create together |
 | `apt` | appointments | (`adate`,`achair`,`atime`) | `apid`=pid, `adid`=`dnt.did`, `achair` `'1 '..'4 '`, `atime` time-of-day on 1899-12-30, 10-min grid (`sys.sunitmins`), `atimereq` in units, `aidentifier` GUID |
 | `aps` | appt statuses | `apsid` | ' ' Unconfirmed, P Preconfirmed, Y Confirmed, A Arrived, S Seated, W Waiting, B Billed, D Departed |
@@ -20,5 +20,8 @@
 Unused here (0 rows): `Patient`, `PatientAccount`, `PatientIdToGuidMapping`. `ClinicalPatient` is created lazily (`LegacyPID` = zero-padded pid).
 
 ## Open questions
-- Confirm pid allocation by creating a patient in the GUI and diffing tables.
+- Confirm ABELDent's own pid allocator matches ours (create one in the GUI, diff).
 - `AppointmentLog.ChangeType` codes.
+
+## Verified
+- Direct insert of `pat` + `inf` (test patient ZZTEST/CLAUDE, pid 168) shows in Patient Search and opens cleanly in ABELDent.

@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $Query = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($QueryB64))
 
 if (-not $AllowWrite) {
