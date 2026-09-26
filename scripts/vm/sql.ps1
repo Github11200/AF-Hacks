@@ -8,5 +8,5 @@ $affected = $da.Fill($ds)
 $conn.Close()
 if ($ds.Tables.Count -eq 0) { @{ rowsAffected = $affected } | ConvertTo-Json -Compress; return }
 $cols = $ds.Tables[0].Columns | ForEach-Object ColumnName
-$rows = @($ds.Tables[0].Rows | ForEach-Object { $r = $_; $o = [ordered]@{}; foreach ($c in $cols) { $o[$c] = if ($r[$c] -is [DBNull]) { $null } else { $r[$c] } }; [pscustomobject]$o })
+$rows = @($ds.Tables[0].Rows | ForEach-Object { $r = $_; $o = [ordered]@{}; foreach ($c in $cols) { $v = $r[$c]; $o[$c] = if ($v -is [DBNull]) { $null } elseif ($v -is [datetime]) { $v.ToString("s") } else { $v } }; [pscustomobject]$o })
 ConvertTo-Json -InputObject $rows -Depth 3 -Compress
