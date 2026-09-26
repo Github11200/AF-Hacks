@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Run T-SQL against ABELDent's LocalDB, print JSON rows. Usage: scripts/vm_sql.sh "SELECT ..."  (or - for stdin)
+# Run T-SQL against ABELDent's LocalDB via the guest q.ps1; prints JSON.
+# Usage: scripts/vm_sql.sh [--write] "SELECT ..."   (use - to read SQL from stdin)
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+WRITE=""; [[ "${1:-}" == --write ]] && { WRITE="-AllowWrite"; shift; }
 SQL="$1"; [[ "$SQL" == - ]] && SQL="$(cat)"
-# Base64 the SQL so no quoting survives the ssh/powershell hops
 B64=$(printf '%s' "$SQL" | base64 -w0)
-TMP=$(mktemp --suffix=.ps1); trap 'rm -f "$TMP"' EXIT
-{ echo "\$Sql = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$B64'))"; cat "$ROOT/vm/sql.ps1"; } > "$TMP"
-"$ROOT/vm_ps.sh" "$TMP"
+ssh -o BatchMode=yes -o LogLevel=ERROR abelvm \
+  "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\afhacks\\q.ps1 -QueryB64 $B64 $WRITE"
