@@ -1,12 +1,15 @@
 # SQL runner for ABELDent's LocalDB. Lives in C:\afhacks on the guest. Ported from colombus lab/vm/guest/q.ps1.
-# Read-only unless -AllowWrite. Query arrives base64 (UTF-8) so it survives ssh/cmd quoting.
+# Read-only unless -AllowWrite; -DryRun runs writes then rolls back (validation without side effects).
+# Query and named params (JSON object) arrive base64 UTF-8 so they survive ssh/cmd quoting.
 param(
     [Parameter(Mandatory = $true)][string]$QueryB64,
     [string]$Server = '',
     [string]$Database = 'master',
     [int]$Timeout = 120,
     [ValidateSet('json', 'csv', 'table')][string]$As = 'json',
-    [switch]$AllowWrite
+    [string]$ParamsB64 = '',
+    [switch]$AllowWrite,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +17,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $Query = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($QueryB64))
 
-if (-not $AllowWrite) {
+if (-not ($AllowWrite -or $DryRun)) {
     # Rail 1: no write/DDL/proc keyword anywhere in the text once string literals and comments are
     # removed. Word boundaries keep column names like Deleted or DatePosted legal. INTO blocks
     # SELECT ... INTO; WITH-prefixed DML and leading comments no longer slip past a line-start check.
@@ -65,18 +68,35 @@ $cn = New-Object System.Data.SqlClient.SqlConnection $cs
 $cn.Open()
 # Rail 2: everything runs inside a transaction that is always rolled back, so even a query that
 # slips past rail 1 leaves the vendor database exactly as it was.
-$tx = if ($AllowWrite) { $null } else { $cn.BeginTransaction() }
+$tx = if ($AllowWrite -and -not $DryRun) { $null } else { $cn.BeginTransaction() }
 try {
     $cmd = $cn.CreateCommand()
     $cmd.Transaction = $tx
     $cmd.CommandText = $Query
     $cmd.CommandTimeout = $Timeout
+    # Values bind as @name parameters, never spliced into SQL text
+    if ($ParamsB64) {
+        $params = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ParamsB64)) | ConvertFrom-Json
+        foreach ($p in $params.PSObject.Properties) {
+            $v = if ($null -eq $p.Value) { [DBNull]::Value } else { $p.Value }
+            [void]$cmd.Parameters.AddWithValue("@$($p.Name)", $v)
+        }
+    }
     $da = New-Object System.Data.SqlClient.SqlDataAdapter $cmd
     $ds = New-Object System.Data.DataSet
     [void]$da.Fill($ds)
 
     foreach ($dt in $ds.Tables) {
-        $rows = $dt | Select-Object -Property $dt.Columns.ColumnName
+        # Dates as zone-less ISO: ABELDent stores wall-clock times, and ConvertTo-Json would shift them by the VM's zone
+        $cols = $dt.Columns.ColumnName
+        $rows = foreach ($r in $dt.Rows) {
+            $o = [ordered]@{}
+            foreach ($c in $cols) {
+                $v = $r[$c]
+                $o[$c] = if ($v -is [DBNull]) { $null } elseif ($v -is [datetime]) { $v.ToString('yyyy-MM-ddTHH:mm:ss') } else { $v }
+            }
+            [pscustomobject]$o
+        }
         switch ($As) {
             # -InputObject @() keeps the result an array even for 0 or 1 rows; piping would
             # unroll it into a bare object (1 row) or a {value,Count} wrapper (N rows).
@@ -86,4 +106,4 @@ try {
         }
     }
 }
-finally { if ($tx) { $tx.Rollback() }; $cn.Close() }
+finally { if ($tx -and $tx.Connection) { $tx.Rollback() }; $cn.Close() }
